@@ -2,7 +2,7 @@ import asyncio
 import logging
 import multiprocess as mp
 import os
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Dict
 from nestd import get_all_nested
 
 from robyn.argument_parser import Config
@@ -56,6 +56,7 @@ class Robyn:
         self.event_handlers = {}
         self.exception_handler: Optional[Callable] = None
         self.authentication_handler: Optional[AuthenticationHandler] = None
+        self.dependencies: Dict[str, List[Callable]] = {}
 
     def _add_route(
         self,
@@ -64,6 +65,7 @@ class Robyn:
         handler: Callable,
         is_const: bool = False,
         auth_required: bool = False,
+        dependencies: Optional[List[Callable]] = None,
     ):
         """
         This is base handler for all the route decorators
@@ -77,11 +79,24 @@ class Robyn:
 
         """ We will add the status code here only
         """
+        if dependencies is None:
+            dependencies = []
+
+        # Resolve dependencies
+        resolved_dependencies = [
+            self.get_dependency(dep.__name__) for dep in dependencies
+        ]
+
         if auth_required:
             self.middleware_router.add_auth_middleware(endpoint)(handler)
 
         return self.router.add_route(
-            route_type, endpoint, handler, is_const, self.exception_handler
+            route_type,
+            endpoint,
+            handler,
+            is_const,
+            self.exception_handler,
+            resolved_dependencies,
         )
 
     def before_request(self, endpoint: Optional[str] = None) -> Callable[..., None]:
@@ -105,6 +120,33 @@ class Robyn:
         return self.middleware_router.add_middleware(
             MiddlewareType.AFTER_REQUEST, endpoint
         )
+
+    def add_dependency(self, dependency: Callable, *args, **kwargs):
+        """
+        Adds a dependency to be injected into route handlers.
+
+        :param dependency: The dependency to be injected.
+        :param args: Positional arguments to be passed when resolving the dependency.
+        :param kwargs: Keyword arguments to be passed when resolving the dependency.
+        """
+        name = dependency.__name__
+        if name not in self.dependencies:
+            self.dependencies[name] = []
+        self.dependencies[name].append((dependency, args, kwargs))
+
+    def get_dependency(self, name: str):
+        """
+        Retrieves the dependency by name.
+
+        :param name: The name of the dependency.
+        :return: The resolved dependency.
+        """
+        dependencies = self.dependencies.get(name, [])
+        resolved_dependencies = []
+        for dependency, args, kwargs in dependencies:
+            resolved_dependency = dependency(*args, **kwargs)
+            resolved_dependencies.append(resolved_dependency)
+        return resolved_dependencies
 
     def add_directory(
         self,
