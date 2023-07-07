@@ -148,6 +148,45 @@ class Robyn:
             resolved_dependencies.append(resolved_dependency)
         return resolved_dependencies
 
+    def inject(self, http_method=None, route=None):
+        """
+        Decorator to inject dependencies into a route handler based on the specified HTTP method and route.
+
+        :param http_method: str: HTTP method (e.g., "GET", "POST", etc.)
+        :param route: str: Route path (e.g., "/route")
+        """
+
+        def decorator(handler):
+            # Inject the dependency based on the specified HTTP method and route
+            if http_method is not None and route is not None:
+                key = f"{http_method}:{route}"
+                self.dependencies[key] = handler
+            return handler
+
+        return decorator
+
+    def inject_route(self, route):
+        """
+        Decorator to inject dependencies into a route handler based on the specified route.
+
+        :param route: str: Route path (e.g., "/route")
+        """
+
+        def decorator(handler):
+            # Inject the dependency based on the specified route
+            self.dependencies[route] = handler
+            return handler
+
+        return decorator
+
+    def get_injected_dependencies(self) -> dict:
+        """
+        Retrieves the injected dependencies.
+
+        :return: dict: A dictionary containing the injected dependencies.
+        """
+        return self.dependencies
+
     def add_directory(
         self,
         route: str,

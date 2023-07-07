@@ -39,6 +39,7 @@ class Router(BaseRouter):
     def __init__(self) -> None:
         super().__init__()
         self.routes: List[Route] = []
+        self.dependencies = {}
 
     def _format_response(self, res):
         response = {}
@@ -110,6 +111,27 @@ class Router(BaseRouter):
 
     def get_routes(self) -> List[Route]:
         return self.routes
+
+    def inject(self, http_method=None, route=None):
+        def decorator(handler):
+            # Inject the dependency based on the specified HTTP method and route
+            if http_method is not None and route is not None:
+                key = f"{http_method}:{route}"
+                self.dependencies[key] = handler
+            return handler
+
+        return decorator
+
+    def inject_route(self, route):
+        def decorator(handler):
+            # Inject the dependency based on the specified route
+            self.dependencies[route] = handler
+            return handler
+
+        return decorator
+
+    def get_injected_dependencies(self) -> dict:
+        return self.dependencies
 
 
 class MiddlewareRouter(BaseRouter):
