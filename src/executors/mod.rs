@@ -11,7 +11,7 @@ use crate::types::{
     function_info::FunctionInfo, request::Request, response::Response, MiddlewareReturn,
 };
 
-// Define a trait to represent the handler dependency.
+// Dependency Handler
 trait HandlerTrait<'a> {
     fn call(&self, args: (&PyAny,)) -> Result<&'a PyAny, PyErr>;
 }
@@ -25,12 +25,11 @@ fn get_function_output<'a, T>(
 where
     T: ToPyObject,
 {
-    // Retrieve the handler from the dependencies based on the HTTP method and route.
+    // Retrieve dependencies from the handler based on the HTTP method and route.
     let key = format!("{}:{}", function.http_method, function.route);
     let handler = dependencies.get(&key)
         .ok_or_else(|| PyErr::new(py, PyValueError::new_err("Dependency not found.")))?;
 
-    // Rest of the code remains the same.
     match function.number_of_params {
         0 => handler.call0(),
         1 => handler.call1((input.to_object(py),)),
