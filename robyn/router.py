@@ -114,7 +114,6 @@ class Router(BaseRouter):
 
     def inject(self, http_method=None, route=None):
         def decorator(handler):
-            # Inject the dependency based on the specified HTTP method and route
             if http_method is not None and route is not None:
                 key = f"{http_method}:{route}"
                 self.dependencies[key] = handler
@@ -124,10 +123,8 @@ class Router(BaseRouter):
 
     def inject_route(self, route):
         def decorator(handler):
-            # Inject the dependency based on the specified route
             self.dependencies[route] = handler
             return handler
-
         return decorator
 
     def get_injected_dependencies(self) -> dict:
