@@ -26,6 +26,7 @@ use actix_http::KeepAlive;
 use actix_web::web::Bytes;
 use actix_web::*;
 use dashmap::DashMap;
+use core::option::Option;
 
 // pyO3 module
 use log::{debug, error};
@@ -51,6 +52,7 @@ pub struct Server {
     const_router: Arc<ConstRouter>,
     websocket_router: Arc<WebSocketRouter>,
     middleware_router: Arc<MiddlewareRouter>,
+    dependencies_router: Option::<Arc<DashMap<String, PyObject>>>,
     global_request_headers: Arc<DashMap<String, String>>,
     global_response_headers: Arc<DashMap<String, String>>,
     directories: Arc<RwLock<Vec<Directory>>>,
@@ -67,6 +69,7 @@ impl Server {
             const_router: Arc::new(ConstRouter::new()),
             websocket_router: Arc::new(WebSocketRouter::new()),
             middleware_router: Arc::new(MiddlewareRouter::new()),
+            dependencies_router: Option::None,
             global_request_headers: Arc::new(DashMap::new()),
             global_response_headers: Arc::new(DashMap::new()),
             directories: Arc::new(RwLock::new(Vec::new())),
@@ -97,6 +100,7 @@ impl Server {
         let const_router = self.const_router.clone();
         let middleware_router = self.middleware_router.clone();
         let web_socket_router = self.websocket_router.clone();
+        let dependencies_router = self.dependencies_router.clone();
         let global_request_headers = self.global_request_headers.clone();
         let global_response_headers = self.global_response_headers.clone();
         let directories = self.directories.clone();
@@ -393,7 +397,7 @@ async fn index(
         request.path_params = route_params;
     }
     for before_middleware in before_middlewares {
-        request = match execute_middleware_function(&request, &before_middleware).await {
+        request = match execute_middleware_function(&request, &before_middleware, Option<&HashMap<String, &pyo3::PyAny>>).await {
             Ok(MiddlewareReturn::Request(r)) => r,
             Ok(MiddlewareReturn::Response(r)) => {
                 // If a before middleware returns a response, we abort the request and return the response
@@ -421,7 +425,7 @@ async fn index(
         req.uri().path(),
     ) {
         request.path_params = route_params;
-        execute_http_function(&request, &function)
+        execute_http_function(&request, &function, Option<&HashMap<String, &pyo3::PyAny>>)
             .await
             .unwrap_or_else(|e| {
                 error!(
@@ -453,7 +457,7 @@ async fn index(
         after_middlewares.push(function);
     }
     for after_middleware in after_middlewares {
-        response = match execute_middleware_function(&response, &after_middleware).await {
+        response = match execute_middleware_function(&response, &after_middleware, Option<&HashMap<String, &pyo3::PyAny>>).await {
             Ok(MiddlewareReturn::Request(_)) => {
                 error!("After middleware returned a request");
                 return Response::internal_server_error(&request.headers);

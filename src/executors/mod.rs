@@ -4,14 +4,15 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use log::debug;
+use std::collections::HashMap;
 use pyo3::prelude::*;
 use pyo3_asyncio::TaskLocals;
+use pyo3::exceptions::PyValueError;
 
 use crate::types::{
     function_info::FunctionInfo, request::Request, response::Response, MiddlewareReturn,
 };
 
-// Dependency Handler
 trait HandlerTrait<'a> {
     fn call(&self, args: (&PyAny,)) -> Result<&'a PyAny, PyErr>;
 }
@@ -20,36 +21,45 @@ fn get_function_output<'a, T>(
     function: &'a FunctionInfo,
     py: Python<'a>,
     input: &T,
-    dependencies: &'a HashMap<String, &'a PyAny>,
-) -> Result<&'a PyAny, PyErr>
+    dependencies: Option<&'a HashMap<String, &'a PyAny>>,
+) -> PyResult<&'a PyAny>
 where
     T: ToPyObject,
 {
-    // Retrieve dependencies from the handler based on the HTTP method and route.
-    let key = format!("{}:{}", function.http_method, function.route);
+    let key = format!("{}:{}", function.is_async, function.route);
+
+    // if None, dependencies == empty
+    let dependencies = dependencies.unwrap_or(&HashMap::new());
+
     let handler = dependencies.get(&key)
-        .ok_or_else(|| PyErr::new(py, PyValueError::new_err("Dependency not found.")))?;
+        .ok_or_else(|| PyErr::new::<PyValueError, _>("Dependency not found."))?;
 
     match function.number_of_params {
-        0 => handler.call0(),
-        1 => handler.call1((input.to_object(py),)),
-        2_u8..=u8::MAX => handler.call1((input.to_object(py),)),
+        0 => handler.call0(py),
+        1 => handler.call1(py, (input.to_object(py),)),
+        2_u8..=u8::MAX => {
+            let dep = dependencies.get("global_dependency")
+                .ok_or_else(|| PyErr::new::<PyValueError, _>("Global dependency not found."))?;
+            handler.call1(py, (input.to_object(py), dep))
+        }
     }
 }
+
 
 // Execute the middleware function
 // type T can be either Request (before middleware) or Response (after middleware)
 // Return type can either be a Request or a Response, we wrap it inside an enum for easier handling
-pub async fn execute_middleware_function<T>(
-    input: &T,
-    function: &FunctionInfo,
+pub async fn execute_middleware_function<'a, T>(
+    input: &'a T,
+    function: &'a FunctionInfo,
+    dependencies: Option<&'a HashMap<String, &'a PyAny>>,
 ) -> Result<MiddlewareReturn>
 where
-    T: for<'a> FromPyObject<'a> + ToPyObject,
+    T: for<'b> FromPyObject<'b> + ToPyObject,
 {
     if function.is_async {
         let output: Py<PyAny> = Python::with_gil(|py| {
-            pyo3_asyncio::tokio::into_future(get_function_output(function, py, input)?)
+            pyo3_asyncio::tokio::into_future(get_function_output(function, py, input, dependencies)?)
         })?
         .await?;
 
@@ -62,7 +72,7 @@ where
         })
     } else {
         Python::with_gil(|py| -> Result<MiddlewareReturn> {
-            let output = get_function_output(function, py, input)?;
+            let output = get_function_output(function, py, input, dependencies)?;
             match output.extract::<Response>() {
                 Ok(o) => Ok(MiddlewareReturn::Response(o)),
                 Err(_) => Ok(MiddlewareReturn::Request(output.extract::<Request>()?)),
@@ -71,14 +81,17 @@ where
     }
 }
 
+
+
 #[inline]
-pub async fn execute_http_function(
+pub async fn execute_http_function<'a, T>(
     request: &Request,
     function: &FunctionInfo,
+    dependencies: Option<&'a HashMap<String, &'a PyAny>>,
 ) -> PyResult<Response> {
     if function.is_async {
         let output = Python::with_gil(|py| {
-            let function_output = get_function_output(function, py, request)?;
+            let function_output = get_function_output(function, py, request, dependencies)?;
             pyo3_asyncio::tokio::into_future(function_output)
         })?
         .await?;
@@ -87,7 +100,7 @@ pub async fn execute_http_function(
     };
 
     Python::with_gil(|py| -> PyResult<Response> {
-        get_function_output(function, py, request)?.extract()
+        get_function_output(function, py, request, dependencies)?.extract()
     })
 }
 
